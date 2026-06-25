@@ -7,20 +7,21 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
 
-def pca_reduction(subdomains):
+def pca_reduction(subdomains, n_comp=2):
     X = np.array([sub.flatten() for sub in subdomains]) # Flattening will make us loose info on x and y
     # Note: maybe a 2D pca is better
-    pca = PCA(n_components=2)
+    pca = PCA(n_components=n_comp)
     Z_pca = pca.fit_transform(X)
     #print(pca.explained_variance_ratio_)
     return Z_pca
 
-def vanilla_kmeans(Z):
-    kmeans_pca = KMeans(n_clusters=3)
+def euclidean_kmeans(Z, k=3):
+    kmeans_pca = KMeans(n_clusters=k)
     labels_pca = kmeans_pca.fit_predict(Z)
-    return labels_pca
+    centroids = kmeans_pca.cluster_centers_
+    return labels_pca, centroids
 
-def energy_spectrum_reduction(subdomains, top_p=10):
+def energy_spectrum_reduction(subdomains, top_p=2):
     features = []
     N = subdomains[0].shape[0] # assuming the shape of the subdomain is (N, N)
 
@@ -33,6 +34,9 @@ def energy_spectrum_reduction(subdomains, top_p=10):
     # E.g., for N=32 bins will be 0,1,..,16
     max_k = N//2
     radial_bins = np.arange(0, max_k+1)
+    #note: I need to review this since the in the even case we drop the furthest corner
+    #also we mix the diagonal energies with axial energies since we "project" the corners
+    #into the closest rings
 
     for sub in subdomains:
         # 2D fourier transform
@@ -57,15 +61,11 @@ def energy_spectrum_reduction(subdomains, top_p=10):
         if total_energy > 0:
             energy_1d = energy_1d / total_energy
 
-    print(np.array(features).shape, np.array(features)[0])
+    #print(np.array(features).shape, np.array(features)[0])
     return np.array(features)
 
 def wassertein_kmeans(X, k, max_iter=100, tol=1e-4):
     n_samples = X.shape[0]
-    support = np.arange(X.shape[1])
-
-    #def spectrum_distance(x, c):
-    #    return wasserstein_distance(support, support, u_weights=x, v_weights=c)
 
     # K-means++ initialisation
     centroids = [X[np.random.randint(n_samples)]]
@@ -106,7 +106,8 @@ def wassertein_kmeans(X, k, max_iter=100, tol=1e-4):
     return labels, centroids
 
 
-
+# plot of the subdomains labeled as colored rectangles depending on their labels
+# for test!
 
 u = load_data()
 print("u shape:", u.shape)

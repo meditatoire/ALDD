@@ -54,12 +54,12 @@ def energy_spectrum_reduction(subdomains, top_p=10):
             mask = (r >= r_val - 0.5) & (r < r_val + 0.5)
             if np.any(mask):
                 energy_1d[i] = np.mean(energy_2d[mask])
-        features.append(energy_1d[:top_p])
 
         # Normalize to one for wassertein distance later
         total_energy = np.sum(energy_1d)
         if total_energy > 0:
             energy_1d = energy_1d / total_energy
+        features.append(energy_1d[:top_p])
 
     #print(np.array(features).shape, np.array(features)[0])
     return np.array(features)

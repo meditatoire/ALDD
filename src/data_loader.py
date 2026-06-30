@@ -63,3 +63,15 @@ def domain_decomposition(time_series, block_size=32, overlap=1):
                 subdomains_t1.append(u_t1[i:i+block_size, j:j+block_size])
 
     return np.array(subdomains_t), np.array(subdomains_t1)
+
+def domain_decomp_single_frame(frame, block_size=32, overlap=1):
+    """Slices a single 2D frame into subdomains for inference."""
+    H, W = frame.shape
+    subdomains = []
+    step = block_size - overlap
+
+    for i in range(0, H-block_size+1, step):
+        for j in range(0, W-block_size+1, step):
+            subdomains.append(frame[i:i+block_size, j:j+block_size])
+
+    return np.array(subdomains)

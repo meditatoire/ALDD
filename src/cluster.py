@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
 
-def pca_reduction(subdomains, n_comp=2):
+def pca_reduction(subdomains, n_comp=10):
     X = np.array([sub.flatten() for sub in subdomains]) # Flattening will make us loose info on x and y
     # Note: maybe a 2D pca is better
     pca = PCA(n_components=n_comp)
@@ -21,7 +21,7 @@ def euclidean_kmeans(Z, k=3):
     centroids = kmeans_pca.cluster_centers_
     return labels_pca, centroids
 
-def energy_spectrum_reduction(subdomains, top_p=2):
+def energy_spectrum_reduction(subdomains, top_p=10):
     features = []
     N = subdomains[0].shape[0] # assuming the shape of the subdomain is (N, N)
 
@@ -109,38 +109,38 @@ def wassertein_kmeans(X, k, max_iter=100, tol=1e-4):
 # plot of the subdomains labeled as colored rectangles depending on their labels
 # for test!
 
-u = load_data()
-print("u shape:", u.shape)
-block_size = 32
-overlap = 1
-subdomains, coords = domain_decomposition(u, block_size=block_size, overlap=overlap)
-Z = energy_spectrum_reduction(subdomains)
-labels, centroids = wassertein_kmeans(Z, 3)
+# u = load_data()
+# print("u shape:", u.shape)
+# block_size = 32
+# overlap = 1
+# subdomains, coords = domain_decomposition(u, block_size=block_size, overlap=overlap)
+# Z = energy_spectrum_reduction(subdomains)
+# labels, centroids = wassertein_kmeans(Z, 3)
 
-fig, ax = plt.subplots(figsize=(7, 7))
+# fig, ax = plt.subplots(figsize=(7, 7))
 
-#Field plot
-im = ax.imshow(u, cmap="viridis", origin="upper")
-plt.colorbar(im, ax=ax, label="Field value")
+# #Field plot
+# im = ax.imshow(u, cmap="viridis", origin="upper")
+# plt.colorbar(im, ax=ax, label="Field value")
 
-# Plot cluster rectangles on top
-cluster_cmap = plt.get_cmap("flag", len(np.unique(labels)))
-for (i, j), label in zip(coords, labels):
-    color = cluster_cmap(label)
-    rect = Rectangle(
-        (j - 0.5, i - 0.5),
-        block_size,
-        block_size,
-        fill=False,
-        edgecolor=color,
-        linewidth=2,
-    )
-    ax.add_patch(rect)
+# # Plot cluster rectangles on top
+# cluster_cmap = plt.get_cmap("flag", len(np.unique(labels)))
+# for (i, j), label in zip(coords, labels):
+#     color = cluster_cmap(label)
+#     rect = Rectangle(
+#         (j - 0.5, i - 0.5),
+#         block_size,
+#         block_size,
+#         fill=False,
+#         edgecolor=color,
+#         linewidth=2,
+#     )
+#     ax.add_patch(rect)
 
-ax.set_xlim(-0.5, u.shape[1] - 0.5)
-ax.set_ylim(u.shape[0] - 0.5, -0.5)
-ax.set_title("Clusters Over Synthetic Field")
-ax.set_xlabel("x")
-ax.set_ylabel("y")
+# ax.set_xlim(-0.5, u.shape[1] - 0.5)
+# ax.set_ylim(u.shape[0] - 0.5, -0.5)
+# ax.set_title("Clusters Over a Field")
+# ax.set_xlabel("x")
+# ax.set_ylabel("y")
 
-plt.show()
+# plt.show()

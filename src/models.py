@@ -1,12 +1,7 @@
-import data_loader
-import cluster
 import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.stats import wasserstein_distance
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=500):
@@ -97,121 +92,103 @@ class DeepONet_BENO(nn.Module):
 
         return dot_product
 
-N = 16
-BATCH_SIZE = 32 #num of subdomains in a batch
-EPOCHS = 30
-K_CLUSTER = 3
-TOP_P = 15 # top-p energies, for dimension reduction
+class SpectralConv(nn.Module):
+    def __init__(self, in_channels, out_channels, modes1, modes2):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.modes1 = modes1 # num of fourier modes to keep in dim 1
+        self.modes2 = modes2 # num of fourier mdoes to keep in dim 2
 
-device = torch.device('cuda' if torch.cuda.is_available else 'cpu')
+        self.scale = 1 / (in_channels*out_channels)
+        #model parameters
+        self.weight1 = nn.Parameter(self.scale * torch.rand(self.in_channels, self.out_channels, self.modes1, self.modes2, dtype=torch.cfloat))
+        self.weight2 = nn.Parameter(self.scale * torch.rand(self.in_channels, self.out_channels, self.modes1, self.modes2, dtype=torch.cfloat))
 
-# Trunk input 32x32 grid normalized for better training
-x = np.linspace(-1, 1, N)
-y = np.linspace(-1, 1, N)
-X, Y = np.meshgrid(x, y)
-# flaten to shape(1024, 2)
-grid_coords = np.stack([X.flatten(), Y.flatten()], axis=1)
-grid_coords_tensor = torch.tensor(grid_coords, dtype=torch.float32).to(device)
+    def mul2d(self, input, output):
+        # (batch, in_channel, x, y) * (batch, out_channel, x, y) -> (batch, out_channel, x, y)
+        return torch.einsum('bixy, ioxy -> boxy', input, output)
 
-time_series = data_loader.load_data(num_timesteps=100, start_t=0)
-u_t_all, u_t1_all = data_loader.domain_decomposition(time_series, N)
+    def forward(self, x):
+        batch_size = x.shape[0]
 
-#Encode and cluster
-Z_spec = cluster.energy_spectrum_reduction(u_t_all, top_p=TOP_P)
-labels, centroids = cluster.wassertein_kmeans(Z_spec, K_CLUSTER)
-trained_models = []
+        # fourier transform
+        x_ft = torch.fft.rfft2(x) # real fft
+        out_ft = torch.zeros(batch_size, self.out_channels, x.size(-2), x.size(-1)//2 + 1, dtype=torch.cfloat, device=x.device)
+        out_ft[:, :, :self.modes1, :self.modes2] = self.mul2d(x_ft[:, :, :self.modes1, :self.modes2], self.weight1)
+        out_ft[:, :, -self.modes1:, :self.modes2] = self.mul2d(x_ft[:, :, -self.modes1:, :self.modes2], self.weight2)
+        x = torch.fft.irfft2(out_ft, s=(x.size(-2), x.size(-1)))
+        return x
 
-for cluster_idx in range(K_CLUSTER):
-    cluster_u_t = u_t_all[labels==cluster_idx]
-    cluster_u_t1 = u_t1_all[labels==cluster_idx]
-    cluster_boundaries = np.array([data_loader.extract_boundary(sub) for sub in cluster_u_t])
+class FNO_Block(nn.Module):
+    def __init__(self, width, modes1, modes2):
+        super().__init__()
+        self.conv = SpectralConv(width, width, modes1, modes2)
+        #Bypass linear transformation (1x1 conv)
+        self.w = nn.Conv2d(width, width, 1)
+        self.act = nn.GELU() # The paper specified GELU for FNO
 
-    u_t_tensor = torch.tensor(np.array([sub.flatten() for sub in cluster_u_t]), dtype=torch.float32).to(device)
-    u_t1_tensor = torch.tensor(np.array([sub.flatten() for sub in cluster_u_t1]), dtype=torch.float32).to(device)
-    boundary_tensor = torch.tensor(cluster_boundaries, dtype=torch.float32).unsqueeze(-1).to(device)
+    def forward(self, x):
+        x1 = self.conv(x)
+        x2 = self.w(x)
+        return self.act(x1 +x2)
 
-    model = DeepONet_BENO(branch_input_dim=N*N, trunk_input_dim=2, latent_dim=128).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
-    loss_func = nn.MSELoss()
+class FNO_BENO(nn.Module):
+    def __init__(self, boundary_size, modes=8, width=64, num_layers=4):
+        super().__init__()
+        self.modes1 = modes
+        self.modes2 = modes
+        self.width = width
+        self.num_layers = num_layers
 
-    for epoch in range(EPOCHS):
-        model.train()
-        epoch_loss = 0
-        for i in range(0, len(u_t_tensor), BATCH_SIZE):
-            batch_u_t = u_t_tensor[i:i+BATCH_SIZE]
-            batch_u_t1 = u_t1_tensor[i:i+BATCH_SIZE]
-            batch_boundaries = boundary_tensor[i:i+BATCH_SIZE]
+        #Boundary transformer BENO
+        self.beno_conv = nn.Conv1d(in_channels=1, out_channels=width, kernel_size=3, padding='same')
+        self.pos_encoder = PositionalEncoding(d_model=width)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=width, nhead=2, batch_first=True)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
+        self.beno_proj = nn.Linear(width, width)
 
-            optimizer.zero_grad()
-            predictions = model.forward(batch_u_t, grid_coords_tensor, batch_boundaries)
-            loss = loss_func(predictions, batch_u_t1)
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item()
-        print(f"Epoch {epoch+1}/{EPOCHS}, Loss: {epoch_loss / (len(u_t_tensor) /BATCH_SIZE)}")
-    trained_models.append(model)
 
-def subdomain_union(subdomains, H, W, block_size=N, overlap=1):
-    """Domain reconstruction for predictions (overlaping zones are averaged)"""
-    step = block_size - overlap
-    full_domain = np.zeros((H,W))
-    count = np.zeros((H,W))
+        #FNO arch
+        # input is 1 channel u_velocity + 2 channels x and y
+        self.fc0 = nn.Linear(3, self.width)
+        # Stack FNO layers
+        self.layers = nn.ModuleList([FNO_Block(self.width, self.modes1, self.modes2) for _ in range(num_layers)])
+        # Project down
+        self.fc1 = nn.Linear(self.width, 128)
+        self.fc2 = nn.Linear(128, 1) # out 1 channel u_velocity
 
-    idx=0
-    for i in range(0, H-block_size+1, step):
-        for j in range(0, W-block_size+1, step):
-            full_domain[i:i+block_size, j:j+block_size] += subdomains[idx]
-            count[i:i+block_size, j:j+block_size] += 1   #2 in overlapping boundaries 1 elsewhere
-            idx += 1
-    return full_domain/np.maximum(count, 1)
+    def forward(self, x, grid, boundary_u):
+        """
+        x: (batch_size, 1, x, y)
+        grid: (batch, 2, x, y)
+        boundary_u: (batch_size, block_size*4 -4, 1)
+        """
 
-print("Validation")
-VAL_TIMESTEPS = 10
-val_series = data_loader.load_data(num_timesteps=VAL_TIMESTEPS, start_t=120)
-H, W = val_series.shape[1], val_series.shape[2]
+        # Process boundary
+        beno_conv_out = self.beno_conv(boundary_u.transpose(1,2)).transpose(1,2) # (batch, boudary_size, width)
+        beno_embed = self.transformer_encoder(self.pos_encoder(beno_conv_out)) # (batch, boudary_size, width)
+        beno_embed = beno_embed.mean(dim=1) # (batch, width)
+        beno_embed = self.beno_proj(beno_embed) # (batch, width)
 
-current_frame = val_series[0]
-prediction_series = []
-for t in range(VAL_TIMESTEPS-1):
-    sub_t = data_loader.domain_decomp_single_frame(current_frame, N)
-    Z_val = cluster.energy_spectrum_reduction(sub_t, top_p=TOP_P)
-    val_labels = np.array([np.argmin([wasserstein_distance(z, c) for c in centroids]) for z in Z_val])
+        #Concat input and grid
+        x_cat = torch.cat((x, grid), dim=1) # (batch, 3, x, y)
+        x_cat = x_cat.permute(0, 2, 3, 1) # (batch, x, y, 3)
+        v0 = self.fc0(x_cat) # (batch, x, y, width)
 
-    #subdomain prediction
-    predicted_subs = np.zeros_like(sub_t)
-    for i, sub in enumerate(sub_t):
-        model = trained_models[val_labels[i]]
-        model.eval()
-        sub_tensor = torch.tensor(sub.flatten(), dtype=torch.float32).unsqueeze(0).to(device)
-        bound = data_loader.extract_boundary(sub)
-        boundary_tensor = torch.tensor(bound, dtype=torch.float32).unsqueeze(0).unsqueeze(-1).to(device)
+        # Add boundary embeddings
+        v0 = v0 + beno_embed.unsqueeze(1).unsqueeze(1)
+        # Permute back for spectral conv
+        v0 = v0.permute(0, 3, 1, 2)
 
-        with torch.no_grad():
-            pred = model(sub_tensor, grid_coords_tensor, boundary_tensor)
+        # Apply FNO layers
+        v = v0
+        for layer in self.layers:
+            v = layer(v)
 
-        predicted_subs[i] = pred.squeeze().cpu().numpy().reshape(N,N)
+        # Project to physical space
+        v = v.permute(0, 2, 3, 1)
+        v = F.gelu(self.fc1(v))
+        out = self.fc2(v) # (batch, x, y, 1)
 
-    next_frame = subdomain_union(predicted_subs, H, W, block_size=N, overlap=1)
-    prediction_series.append(next_frame)
-    current_frame = next_frame
-
-    # calcultate the R² score for this timestep
-    true_frame = val_series[t+1]
-    ss_res = np.sum((true_frame - next_frame)**2)
-    ss_total = np.sum((true_frame - np.mean(true_frame))**2)
-    r2 = 1 - ss_res / ss_total
-    print(f"Step: {t+1}/{VAL_TIMESTEPS} | R² Score: {r2}")
-
-true_final = val_series[-1]
-pred_final = prediction_series[-1]
-error_map = np.abs(true_final - pred_final)
-
-fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-axes[0].imshow(true_final, cmap='viridis')
-axes[0].set_title("Ground truth T+10")
-axes[1].imshow(pred_final, cmap='viridis')
-axes[1].set_title("Prediction T+10")
-im3 = axes[2].imshow(error_map, cmap='magma')
-axes[2].set_title("Absolute error")
-fig.colorbar(im3, ax=axes[2])
-plt.show()
+        return out.permute(0, 3, 1, 2)

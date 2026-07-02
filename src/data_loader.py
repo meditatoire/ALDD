@@ -27,7 +27,9 @@ def load_data(num_timesteps=100, start_t=0):
     y_coords = X[:, 1]
 
     # we create a uniform grid of 256x128 points
-    grid_x, grid_y = np.mgrid[min(x_coords):max(x_coords):256j, min(y_coords):max(y_coords):128j]
+    # NOTE!!! The grid dim was changed to (256,151) to fill the whole domain with uniform boxes (16,16) for a more accurate r2 score
+    # NEED A TRUE FIX
+    grid_x, grid_y = np.mgrid[min(x_coords):max(x_coords):256j, min(y_coords):max(y_coords):151j]
 
     time_series = []
     for t in range(start_t, start_t+num_timesteps):
@@ -45,7 +47,7 @@ def load_data(num_timesteps=100, start_t=0):
     #plt.title("Interpolated Grid vs Original Scattered Points")
     #plt.show()
 
-    return np.array(time_series) #Shape (T, 128, 256)
+    return np.array(time_series) #Shape (T, 151, 256)
 
 def domain_decomposition(time_series, block_size=32, overlap=1):
     T,H, W = time_series.shape

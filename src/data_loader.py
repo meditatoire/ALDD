@@ -75,3 +75,15 @@ def domain_decomp_single_frame(frame, block_size=32, overlap=1):
             subdomains.append(frame[i:i+block_size, j:j+block_size])
 
     return np.array(subdomains)
+
+def extract_boundary(subdomain):
+    """Extracts the perimeter nodes of a 2D subdomain in order."""
+    # Top row, right col (excluding last), bottom row (reversed), left col (reversed)
+    top = subdomain[0, :]
+    bottom = subdomain[-1, ::-1]
+    left = subdomain[1:-1, 0]
+    right = subdomain[1:-1, -1]
+
+    # Concatenate to form a continuous loop of boundary nodes
+    boundary = np.concatenate([top, right, bottom, left[::-1]])
+    return boundary

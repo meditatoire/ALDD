@@ -13,10 +13,11 @@ MODEL_TYPE = 'fno'  # model: 'fno' or 'deeponet'
 
 N = 16     # Subdomain size (NxN)
 BATCH_SIZE = 64
-EPOCHS = 30
+EPOCHS = 100
 K_CLUSTER = 3
 TOP_P = 25 # Dimension reduction for subdomain clustering
 VAL_TIMESTEPS = 10
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def subdomain_union(subdomains, H, W, block_size=N, overlap=1):
@@ -121,7 +122,7 @@ def validate_autoregressive(trained_models, centroids, grid_data):
     for t in range(VAL_TIMESTEPS - 1):
         sub_t = data_loader.domain_decomp_single_frame(current_frame, N)
         Z_val = cluster.energy_spectrum_reduction(sub_t, top_p=TOP_P)
-        val_labels = np.array([np.argmin([wasserstein_distance(z, c) for c in centroids]) for z in Z_val])
+        val_labels = np.array([np.argmin([cluster.spectrum_wassertein(z, c) for c in centroids]) for z in Z_val])
 
         predicted_subs = np.zeros_like(sub_t)
         for i, sub in enumerate(sub_t):

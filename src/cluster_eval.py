@@ -3,7 +3,6 @@ import data_loader
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.stats import wasserstein_distance
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 
@@ -20,7 +19,7 @@ def evaluate_clustering(X, labels, centroids, distance_func):
         distance_matrix = np.zeros((len(X), len(X)))
         for i in range(len(X)):
             for j in range(i+1, len(X)):
-                d = wasserstein_distance(X[i], X[j])
+                d = cluster.spectrum_wasserstein(X[i], X[j])
                 distance_matrix[i, j] = d
                 distance_matrix[j, i] = d
         sil_score = silhouette_score(distance_matrix, labels, metric='precomputed')
@@ -33,7 +32,7 @@ def evaluate_clustering(X, labels, centroids, distance_func):
     for i in range(k):
         for j in range(i+1, k):
             if distance_func == 'wassertein':
-                separation += wasserstein_distance(centroids[i], centroids[j])
+                separation += cluster.spectrum_wasserstein(centroids[i], centroids[j])
             else:
                 separation += np.linalg.norm(centroids[i] - centroids[j])
             pairs += 1
@@ -45,7 +44,7 @@ def evaluate_clustering(X, labels, centroids, distance_func):
         cluster_points = X[labels == i]
         for p in cluster_points:
             if distance_func == 'wassertein':
-                compactness += wasserstein_distance(p, centroids[i])
+                compactness += cluster.spectrum_wasserstein(p, centroids[i])
             else:
                 compactness += np.linalg.norm(p - centroids[i])
     compactness /= len(X)
@@ -55,7 +54,7 @@ def evaluate_clustering(X, labels, centroids, distance_func):
 
     return sil_score, separation, compactness, ratio
 
-subdomains, position = data_loader.domain_decomposition(data_loader.load_data())
+subdomains, _ = data_loader.domain_decomposition(data_loader.load_data())
 
 # Encode
 Z_pca = cluster.pca_reduction(subdomains, 10)
@@ -63,7 +62,6 @@ Z_spec = cluster.energy_spectrum_reduction(subdomains, top_p=10)
 
 # Cluster
 labels_euclidean_pca, centr_euclidean_pca = cluster.euclidean_kmeans(Z_pca)
-labels_wassertein_pca, centr_wassertein_pca = cluster.wassertein_kmeans(Z_pca, k=3)
 labels_euclidean_spec, centr_euclidean_spec = cluster.euclidean_kmeans(Z_spec)
 labels_wassertein_spec, centr_wassertein_spec = cluster.wassertein_kmeans(Z_spec, k=3)
 
@@ -72,8 +70,6 @@ print(f"{'Method': <25}, | {'Silhoutte': <12} |{'Separation': <12}, | {'Compactn
 print("-"*85)
 metrics = evaluate_clustering(Z_pca, labels_euclidean_pca, centr_euclidean_pca, 'euclidean')
 print(f"{'PCA + Euclidean': <25} | {metrics[0]} | {metrics[1]} | {metrics[2]} | {metrics[3]}")
-metrics = evaluate_clustering(Z_pca, labels_wassertein_pca, centr_wassertein_pca, 'wassertein')
-print(f"{'PCA + Wassertein': <25} | {metrics[0]} | {metrics[1]} | {metrics[2]} | {metrics[3]}")
 metrics = evaluate_clustering(Z_spec, labels_euclidean_spec, centr_euclidean_spec, 'euclidean')
 print(f"{'Spec + Euclidean': <25} | {metrics[0]} | {metrics[1]} | {metrics[2]} | {metrics[3]}")
 metrics = evaluate_clustering(Z_spec, labels_wassertein_spec, centr_wassertein_spec, 'wassertein')

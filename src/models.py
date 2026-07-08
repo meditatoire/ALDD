@@ -106,7 +106,7 @@ class SpectralConv(nn.Module):
         self.weight2 = nn.Parameter(self.scale * torch.rand(self.in_channels, self.out_channels, self.modes1, self.modes2, dtype=torch.cfloat))
 
     def mul2d(self, input, output):
-        # (batch, in_channel, x, y) * (batch, out_channel, x, y) -> (batch, out_channel, x, y)
+        # (batch, in_channel, x, y) * (in_channel, out_channel, x, y) -> (batch, out_channel, x, y)
         return torch.einsum('bixy, ioxy -> boxy', input, output)
 
     def forward(self, x):

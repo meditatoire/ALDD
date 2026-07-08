@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
-from data_loader import load_data, domain_decomposition
+from data_loader import load_data, domain_decomposition, domain_decomp_single_frame
 from scipy.stats import wasserstein_distance
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
@@ -48,21 +48,30 @@ def energy_spectrum_reduction(subdomains, top_p=10):
         # Compute energy
         energy_2d = np.abs(f_shifted)**2
 
-        # For each ring of distance r average the values
+        # For each ring of distance r sum the values
         energy_1d = np.zeros(len(radial_bins))
         for i, r_val in enumerate(radial_bins):
             mask = (r >= r_val - 0.5) & (r < r_val + 0.5)
             if np.any(mask):
-                energy_1d[i] = np.mean(energy_2d[mask])
+                energy_1d[i] = np.sum(energy_2d[mask])
+
+        energy_1d = energy_1d[:top_p]
 
         # Normalize to one for wassertein distance later
         total_energy = np.sum(energy_1d)
         if total_energy > 0:
             energy_1d = energy_1d / total_energy
-        features.append(energy_1d[:top_p])
+        features.append(energy_1d)
 
     #print(np.array(features).shape, np.array(features)[0])
     return np.array(features)
+
+def spectrum_wasserstein(x, y):
+    bins = np.arange(len(x))
+    return wasserstein_distance(bins, bins, u_weights=x, v_weights=y)
+
+def spectrum_wassertein(x, y):
+    return spectrum_wasserstein(x, y)
 
 def wassertein_kmeans(X, k, max_iter=100, tol=1e-4):
     n_samples = X.shape[0]
@@ -71,7 +80,7 @@ def wassertein_kmeans(X, k, max_iter=100, tol=1e-4):
     centroids = [X[np.random.randint(n_samples)]]
     for _ in range(1, k):
         dists = np.array([
-            min([wasserstein_distance(x, c) for c in centroids]) for x in X])
+            min([spectrum_wassertein(x, c) for c in centroids]) for x in X])
         sq_dists = dists**2
         if np.sum(sq_dists) == 0:
             next_idx = np.random.randint(n_samples)
@@ -85,7 +94,7 @@ def wassertein_kmeans(X, k, max_iter=100, tol=1e-4):
     labels = np.zeros(n_samples, dtype=int)
     for iter in range(max_iter):
         for i, x in enumerate(X):
-            dists = [wasserstein_distance(x, c) for c in centroids]
+            dists = [spectrum_wassertein(x, c) for c in centroids]
             labels[i] = np.argmin(dists)
 
         new_centroids = centroids.copy()
@@ -95,7 +104,7 @@ def wassertein_kmeans(X, k, max_iter=100, tol=1e-4):
                 new_centroids[j] = cluster_points.mean(axis=0)
             else:
                 min_dists = np.array([
-                    min(wasserstein_distance(x, c) for c in centroids) for x in X
+                    min(spectrum_wasserstein(x, c) for c in centroids) for x in X
                 ])
                 new_centroids[j] = X[np.argmax(min_dists)]
 
@@ -106,14 +115,21 @@ def wassertein_kmeans(X, k, max_iter=100, tol=1e-4):
     return labels, centroids
 
 
-# plot of the subdomains labeled as colored rectangles depending on their labels
-# for test!
+# #plot of the subdomains labeled as colored rectangles depending on their labels
+# #for test!
 
-# u = load_data()
+# time_series = load_data(num_timesteps=1)
+# u = time_series[0]
 # print("u shape:", u.shape)
 # block_size = 32
 # overlap = 1
-# subdomains, coords = domain_decomposition(u, block_size=block_size, overlap=overlap)
+# subdomains = domain_decomp_single_frame(u, block_size=block_size, overlap=overlap)
+# step = block_size - overlap
+# coords = [
+#     (i, j)
+#     for i in range(0, u.shape[0] - block_size + 1, step)
+#     for j in range(0, u.shape[1] - block_size + 1, step)
+# ]
 # Z = energy_spectrum_reduction(subdomains)
 # labels, centroids = wassertein_kmeans(Z, 3)
 

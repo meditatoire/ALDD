@@ -203,6 +203,9 @@ cython_debug/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
+# Trained model checkpoints
+models/
+
 # Ruff stuff:
 .ruff_cache/
 

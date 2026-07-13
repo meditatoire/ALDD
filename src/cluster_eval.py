@@ -8,20 +8,19 @@ from sklearn.metrics import silhouette_score
 
 def evaluate_clustering(X, labels, centroids, distance_func):
     """
-    Evaluating the metrics of the paper: silhoutte, separation, compactness, ratio
-    distance_func: either Euclidiean or Wassertein
+    Evaluating the metrics of the paper: silhouette, separation, compactness, ratio.
+    distance_func: 'euclidean' uses the L2 norm on the feature vectors;
+                   'wassertein' uses the 1D W_2^2 distance between the normalized
+                   energy-spectrum PDFs, consistent with the Wasserstein barycenter
+                   k-means in cluster.py.
     """
     k = len(centroids)
 
-    # Silhoutte score
-    # for wassertein, sklearn don't provide the metrix so we use the distance matrix
+    # Silhouette score.
+    # For Wasserstein, sklearn has no built-in metric, so we feed the precomputed
+    # pairwise W_2^2 distance matrix (computed once via cluster.wasserstein2_distance_matrix).
     if distance_func == "wassertein":
-        distance_matrix = np.zeros((len(X), len(X)))
-        for i in range(len(X)):
-            for j in range(i+1, len(X)):
-                d = cluster.spectrum_wasserstein(X[i], X[j])
-                distance_matrix[i, j] = d
-                distance_matrix[j, i] = d
+        distance_matrix = cluster.wasserstein2_distance_matrix(X)
         sil_score = silhouette_score(distance_matrix, labels, metric='precomputed')
     else:
         sil_score = silhouette_score(X, labels, metric='euclidean')
@@ -66,7 +65,7 @@ labels_euclidean_spec, centr_euclidean_spec = cluster.euclidean_kmeans(Z_spec)
 labels_wassertein_spec, centr_wassertein_spec = cluster.wassertein_kmeans(Z_spec, k=3)
 
 # Eval
-print(f"{'Method': <25}, | {'Silhoutte': <12} |{'Separation': <12}, | {'Compactness': <12}, | {'Ratio': <12}")
+print(f"{'Method': <25} | {'Silhouette': <12} | {'Separation': <12} | {'Compactness': <12} | {'Ratio': <12}")
 print("-"*85)
 metrics = evaluate_clustering(Z_pca, labels_euclidean_pca, centr_euclidean_pca, 'euclidean')
 print(f"{'PCA + Euclidean': <25} | {metrics[0]} | {metrics[1]} | {metrics[2]} | {metrics[3]}")

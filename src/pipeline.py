@@ -118,7 +118,7 @@ def validate_autoregressive(
         sub_t = data_loader.domain_decomp_single_frame(current_frame, n)
         Z_val = cluster.energy_spectrum_reduction(sub_t, top_p=top_p)
         val_labels = np.array([
-            np.argmin([cluster.spectrum_wassertein(z, c) for c in centroids])
+            np.argmin([cluster.spectrum_wasserstein(z, c) for c in centroids])
             for z in Z_val
         ])
 

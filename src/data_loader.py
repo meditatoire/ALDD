@@ -79,13 +79,27 @@ def domain_decomp_single_frame(frame, block_size=32, overlap=1):
     return np.array(subdomains)
 
 def extract_boundary(subdomain):
-    """Extracts the perimeter nodes of a 2D subdomain in order."""
-    # Top row, right col (excluding last), bottom row (reversed), left col (reversed)
-    top = subdomain[0, :]
-    bottom = subdomain[-1, ::-1]
-    left = subdomain[1:-1, 0]
-    right = subdomain[1:-1, -1]
+    """Extracts perimeter nodes: values + local coordinates.
+    Returns: (4N-4,) values, (4N-4, 2) normalized coordinates in [-1, 1].
+    """
+    N = subdomain.shape[0]
+    # Normalized local coordinates for each grid point
+    coords_1d = np.linspace(-1, 1, N)
+    xx, yy = np.meshgrid(coords_1d, coords_1d)  # (N, N) each
 
-    # Concatenate to form a continuous loop of boundary nodes
-    boundary = np.concatenate([top, right, bottom, left[::-1]])
-    return boundary
+    top_val = subdomain[0, :]
+    top_xy = np.stack([xx[0, :], yy[0, :]], axis=1)           # (N, 2)
+
+    right_val = subdomain[1:-1, -1]
+    right_xy = np.stack([xx[1:-1, -1], yy[1:-1, -1]], axis=1) # (N-2, 2)
+
+    bottom_val = subdomain[-1, ::-1]
+    bottom_xy = np.stack([xx[-1, ::-1], yy[-1, ::-1]], axis=1) # (N, 2)
+
+    left_val = subdomain[1:-1, 0]
+    left_xy = np.stack([xx[1:-1, 0], yy[1:-1, 0]], axis=1)     # (N-2, 2)
+    left_xy = left_xy[::-1]  # match the reversed traversal
+
+    boundary_vals = np.concatenate([top_val, right_val, bottom_val, left_val])
+    boundary_xy = np.concatenate([top_xy, right_xy, bottom_xy, left_xy])
+    return boundary_vals, boundary_xy  # (4N-4,), (4N-4, 2)

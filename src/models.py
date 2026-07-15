@@ -21,7 +21,7 @@ class PositionalEncoding(nn.Module):
 
 class DeepONet_BENO(nn.Module):
     #Appendix A.2 for hyperparameters
-    def __init__(self, branch_input_dim, latent_dim, trunk_input_dim=2, hidden_dim=64, output_dim=1, n_heads=2):
+    def __init__(self, branch_input_dim, latent_dim, trunk_input_dim=2, hidden_dim=64, n_heads=2):
         """
         branch_input_dim: Number of observations in a subdomain e.g. 32x32 flattened
         trunk_input_dim: 2 for x and y
@@ -31,7 +31,7 @@ class DeepONet_BENO(nn.Module):
         super().__init__()
 
         #Boundary transformer BENO
-        self.beno_conv = nn.Conv1d(in_channels=1, out_channels=hidden_dim, kernel_size=3, padding='same')
+        self.beno_conv = nn.Conv1d(in_channels=3, out_channels=hidden_dim, kernel_size=3, padding='same') #in_channels of boundary x,y and u
         self.pos_encoder = PositionalEncoding(d_model=hidden_dim)
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=n_heads, batch_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
@@ -142,7 +142,7 @@ class FNO_BENO(nn.Module):
         self.num_layers = num_layers
 
         #Boundary transformer BENO
-        self.beno_conv = nn.Conv1d(in_channels=1, out_channels=width, kernel_size=3, padding='same')
+        self.beno_conv = nn.Conv1d(in_channels=3, out_channels=width, kernel_size=3, padding='same')
         self.pos_encoder = PositionalEncoding(d_model=width)
         encoder_layer = nn.TransformerEncoderLayer(d_model=width, nhead=2, batch_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)

@@ -126,11 +126,9 @@ def validate_autoregressive(
         for i, sub in enumerate(sub_t):
             model = trained_models[val_labels[i]]
 
-            bound = data_loader.extract_boundary(sub)
-            boundary_tensor = torch.tensor(
-                bound,
-                dtype=torch.float32,
-            ).unsqueeze(0).unsqueeze(-1).to(device)
+            vals, xy = data_loader.extract_boundary(sub)
+            boundary_token = np.concatenate([xy, vals.reshape(-1, 1)], axis=1)  # (M, 3)
+            boundary_tensor = torch.tensor(boundary_token, dtype=torch.float32).unsqueeze(0).to(device)
 
             with torch.no_grad():
                 if model_type == 'fno':

@@ -27,12 +27,19 @@ def train_models(u_t_all, u_t1_all, labels, grid_data):
     for cluster_idx in range(K_CLUSTER):
         cluster_u_t = u_t_all[labels == cluster_idx]
         cluster_u_t1 = u_t1_all[labels == cluster_idx]
-        cluster_boundaries = np.array([data_loader.extract_boundary(sub) for sub in cluster_u_t])
+        cluster_boundary_vals = []
+        cluster_boundary_xy = []
+        for sub in cluster_u_t:
+            vals, xy = data_loader.extract_boundary(sub)
+            cluster_boundary_vals.append(vals)
+            cluster_boundary_xy.append(xy)
 
         print(f"Training {MODEL_TYPE.upper()} for Cluster {cluster_idx} ({len(cluster_u_t)} samples)")
 
         # Format Tensors based on model type
-        boundary_tensor = torch.tensor(cluster_boundaries, dtype=torch.float32).unsqueeze(-1).to(device)
+        vals_tensor = torch.tensor(np.stack(cluster_boundary_vals), dtype=torch.float32)
+        xy_tensor   = torch.tensor(np.stack(cluster_boundary_xy), dtype=torch.float32)
+        boundary_tensor = torch.cat([xy_tensor, vals_tensor.unsqueeze(-1)], dim=-1).to(device)
 
         if MODEL_TYPE == 'fno':
             u_t_tensor = torch.tensor(cluster_u_t, dtype=torch.float32).unsqueeze(1).to(device)

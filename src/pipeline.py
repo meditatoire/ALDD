@@ -41,7 +41,7 @@ def setup_grids(model_type, n, device):
 def initialize_model(model_type, n, device):
     """Initializes the selected model."""
     if model_type == 'fno':
-        return FNO_BENO(boundary_size=n*4-4, modes=8, width=64, num_layers=4).to(device)
+        return FNO_BENO(modes=8, width=64, num_layers=4).to(device)
 
     return DeepONet_BENO(branch_input_dim=n*n, latent_dim=128).to(device)
 

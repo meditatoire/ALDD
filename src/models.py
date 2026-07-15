@@ -56,8 +56,6 @@ class DeepONet_BENO(nn.Module):
             nn.Tanh(),
             nn.Linear(hidden_dim, latent_dim)
         )
-        # Final layer
-        self.fc_out = nn.Linear(latent_dim, output_dim)
 
         # Glorot Normalization Appendix A.2
         for m in self.modules():
@@ -121,20 +119,22 @@ class SpectralConv(nn.Module):
         return x
 
 class FNO_Block(nn.Module):
-    def __init__(self, width, modes1, modes2):
+    def __init__(self, width, modes1, modes2, activation=True):
         super().__init__()
+        self.activation = activation
         self.conv = SpectralConv(width, width, modes1, modes2)
         #Bypass linear transformation (1x1 conv)
         self.w = nn.Conv2d(width, width, 1)
-        self.act = nn.GELU() # The paper specified GELU for FNO
+        if self.activation:
+            self.act = nn.GELU()
 
     def forward(self, x):
         x1 = self.conv(x)
         x2 = self.w(x)
-        return self.act(x1 +x2)
+        return self.act(x1 +x2) if self.activation else x1 + x2
 
 class FNO_BENO(nn.Module):
-    def __init__(self, boundary_size, modes=8, width=64, num_layers=4):
+    def __init__(self, modes=8, width=64, num_layers=4):
         super().__init__()
         self.modes1 = modes
         self.modes2 = modes
@@ -153,7 +153,8 @@ class FNO_BENO(nn.Module):
         # input is 1 channel u_velocity + 2 channels x and y
         self.fc0 = nn.Linear(3, self.width)
         # Stack FNO layers
-        self.layers = nn.ModuleList([FNO_Block(self.width, self.modes1, self.modes2) for _ in range(num_layers)])
+        self.layers = nn.ModuleList([FNO_Block(self.width, self.modes1, self.modes2) for _ in range(num_layers -1)])
+        self.last_block = FNO_Block(self.width, self.modes1, self.modes2, activation=False)
         # Project down
         self.fc1 = nn.Linear(self.width, 128)
         self.fc2 = nn.Linear(128, 1) # out 1 channel u_velocity
@@ -185,6 +186,7 @@ class FNO_BENO(nn.Module):
         v = v0
         for layer in self.layers:
             v = layer(v)
+        v = self.last_block(v)
 
         # Project to physical space
         v = v.permute(0, 2, 3, 1)

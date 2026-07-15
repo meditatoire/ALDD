@@ -1,3 +1,5 @@
+from numpy.random.mtrand import permutation
+
 import data_loader
 import cluster
 import torch
@@ -10,7 +12,7 @@ from pipeline import initialize_model, save_checkpoint, setup_grids
 MODEL_TYPE = 'fno'  # model: 'fno' or 'deeponet'
 
 N = 16     # Subdomain size (NxN)
-BATCH_SIZE = 256
+BATCH_SIZE = 512
 EPOCHS = 30
 K_CLUSTER = 3
 TOP_P = 25 # Dimension reduction for subdomain clustering
@@ -46,10 +48,12 @@ def train_models(u_t_all, u_t1_all, labels, grid_data):
         for epoch in range(EPOCHS):
             model.train()
             epoch_loss = 0
+            permutation = torch.randperm(len(u_t_tensor))
             for i in range(0, len(u_t_tensor), BATCH_SIZE):
-                batch_u_t = u_t_tensor[i:i+BATCH_SIZE]
-                batch_u_t1 = u_t1_tensor[i:i+BATCH_SIZE]
-                batch_boundaries = boundary_tensor[i:i+BATCH_SIZE]
+                idx = permutation[i:i+BATCH_SIZE]
+                batch_u_t = u_t_tensor[idx]
+                batch_u_t1 = u_t1_tensor[idx]
+                batch_boundaries = boundary_tensor[idx]
 
                 optimizer.zero_grad()
 
@@ -64,7 +68,8 @@ def train_models(u_t_all, u_t1_all, labels, grid_data):
                 optimizer.step()
                 epoch_loss += loss.item()
 
-            print(f"Epoch {epoch+1}/{EPOCHS}, Loss: {epoch_loss / (len(u_t_tensor) / BATCH_SIZE):.6f}")
+            if (epoch+1) % 10 == 0:
+                print(f"Epoch {epoch+1}/{EPOCHS}, Loss: {epoch_loss / (len(u_t_tensor) / BATCH_SIZE):.6f}")
 
         trained_models.append(model)
 

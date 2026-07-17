@@ -35,13 +35,12 @@ def energy_spectrum_reduction(subdomains, top_p=10):
     # E.g., for N=32 bins will be 0,1,..,16
     max_k = int(np.ceil(np.sqrt(2)*(N/2))) # max_k reaching the corner, maybe wrong needs to be revisited.
     radial_bins = np.arange(0, max_k+1)
-    #note: I need to review this since the in the even case we drop the furthest corner
-    #also we mix the diagonal energies with axial energies since we "project" the corners
+    #note: we mix the diagonal energies with axial energies since we "project" the corners
     #into the closest rings
 
     for sub in subdomains:
         # 2D fourier transform
-        f_transform = np.fft.fft2(sub)
+        f_transform = np.fft.fft2(sub)  # We might do sub-sub.mean() to fix the r0 problem
 
         # Shift zero-frequency component to center
         f_shifted = np.fft.fftshift(f_transform)
@@ -56,15 +55,15 @@ def energy_spectrum_reduction(subdomains, top_p=10):
             if np.any(mask):
                 energy_1d[i] = np.sum(energy_2d[mask])
 
-        energy_1d = energy_1d[:top_p]
-
+        energy_1d = energy_1d[:top_p]   # We might drop r0 before normalization to fix the r0 problem "[1:top_p]"
         # Normalize to one for wassertein distance later
         total_energy = np.sum(energy_1d)
         if total_energy > 0:
             energy_1d = energy_1d / total_energy
         features.append(energy_1d)
 
-    #print(np.array(features).shape, np.array(features)[0])
+    # print(np.mean(np.array(features)[:, 0])) # NOTE!!! r=0 on average is 0.97 and thus the energy of the mean dominate the others
+    # We end up clustering by the energy of the mean
     return np.array(features)
 
 def spectrum_wasserstein(x, y):
@@ -131,7 +130,7 @@ def wassertein_kmeans(X, k, max_iter=100, tol=1e-4):
         if np.sum(dists ** 2) == 0:
             next_idx = np.random.randint(n_samples)
         else:
-            probs = dists ** 2 / np.sum(dists ** 2)
+            probs = dists / np.sum(dists)
             next_idx = np.random.choice(n_samples, p=probs)
         centroids_Q.append(Q[next_idx])
 

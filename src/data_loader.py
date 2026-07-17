@@ -96,7 +96,7 @@ def extract_boundary(subdomain):
     bottom_val = subdomain[-1, ::-1]
     bottom_xy = np.stack([xx[-1, ::-1], yy[-1, ::-1]], axis=1) # (N, 2)
 
-    left_val = subdomain[1:-1, 0]
+    left_val = subdomain[1:-1, 0][::-1]
     left_xy = np.stack([xx[1:-1, 0], yy[1:-1, 0]], axis=1)     # (N-2, 2)
     left_xy = left_xy[::-1]  # match the reversed traversal
 

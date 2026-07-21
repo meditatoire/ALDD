@@ -11,9 +11,15 @@ from pipeline import initialize_model, save_checkpoint, setup_grids
 # Configuration and hyperparameters
 MODEL_TYPE = 'fno'  # model: 'fno' or 'deeponet'
 
+DATASET = "jhtdb"  # "cylinder" or "jhtdb"
+JHTDB_PATH = "./JHTDB/data/jhtdb_test/small_planes.h5"
+TRAIN_Z = [64, 512]  # Hold out the remaining z planes for validation.
+TRAIN_START = 0
+TRAIN_STOP = None
+
 N = 16     # Subdomain size (NxN)
 BATCH_SIZE = 512
-EPOCHS = 30
+EPOCHS = 100
 K_CLUSTER = 3
 TOP_P = 25 # Dimension reduction for subdomain clustering
 
@@ -91,8 +97,20 @@ if __name__ == "__main__":
     grid_data = setup_grids(MODEL_TYPE, N, device)
 
     # Load data and cluster
-    time_series = data_loader.load_data(num_timesteps=100, start_t=0)
-    u_t_all, u_t1_all = data_loader.domain_decomposition(time_series, N)
+    if DATASET == "jhtdb":
+        trajectories, z_indices, _ = data_loader.load_jhtdb_data(
+            JHTDB_PATH,
+            z_indices=TRAIN_Z,
+            start_t=TRAIN_START,
+            stop_t=TRAIN_STOP,
+        )
+        print(f"Training z planes: {z_indices}")
+        u_t_all, u_t1_all = data_loader.domain_decomposition_trajectories(
+            trajectories, N
+        )
+    else:
+        time_series = data_loader.load_data(num_timesteps=100, start_t=0)
+        u_t_all, u_t1_all = data_loader.domain_decomposition(time_series, N)
 
     Z_spec = cluster.energy_spectrum_reduction(u_t_all, top_p=TOP_P)
     labels, centroids = cluster.wassertein_kmeans(Z_spec, K_CLUSTER)

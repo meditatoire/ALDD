@@ -11,13 +11,12 @@ from models import DeepONet_BENO, FNO_BENO
 
 def subdomain_union(subdomains, H, W, block_size, overlap=1):
     """Reconstructs the full domain from subdomains, averaging the overlaps."""
-    step = block_size - overlap
     full_domain = np.zeros((H, W))
     count = np.zeros((H, W))
 
     idx = 0
-    for i in range(0, H - block_size + 1, step):
-        for j in range(0, W - block_size + 1, step):
+    for i in data_loader.block_starts(H, block_size, overlap):
+        for j in data_loader.block_starts(W, block_size, overlap):
             full_domain[i:i+block_size, j:j+block_size] += subdomains[idx]
             count[i:i+block_size, j:j+block_size] += 1
             idx += 1
@@ -106,9 +105,51 @@ def validate_autoregressive(
     top_p,
     val_timesteps,
     device,
+    dataset="cylinder",
+    data_path=None,
+    val_z=None,
 ):
     print(f"Validation up to T+{val_timesteps}")
-    val_series = data_loader.load_data(num_timesteps=val_timesteps, start_t=120)
+    if dataset == "jhtdb":
+        val_series, z_indices, _ = data_loader.load_jhtdb_data(
+            data_path,
+            z_indices=val_z,
+            stop_t=val_timesteps,
+        )
+    else:
+        val_series = data_loader.load_data(num_timesteps=val_timesteps, start_t=120)
+        z_indices = [None]
+
+    if dataset == "cylinder":
+        val_series = val_series[None, ...]
+
+    for z_position, series in enumerate(val_series):
+        if dataset == "jhtdb":
+            print(f"Validating z={z_indices[z_position]}")
+        _validate_series(
+            series,
+            trained_models,
+            centroids,
+            grid_data,
+            model_type,
+            n,
+            top_p,
+            val_timesteps,
+            device,
+        )
+
+
+def _validate_series(
+    val_series,
+    trained_models,
+    centroids,
+    grid_data,
+    model_type,
+    n,
+    top_p,
+    val_timesteps,
+    device,
+):
     H, W = val_series.shape[1], val_series.shape[2]
 
     current_frame = val_series[0]

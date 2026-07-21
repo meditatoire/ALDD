@@ -55,7 +55,7 @@ def energy_spectrum_reduction(subdomains, top_p=10):
             if np.any(mask):
                 energy_1d[i] = np.sum(energy_2d[mask])
 
-        energy_1d = energy_1d[:top_p]   # We might drop r0 before normalization to fix the r0 problem "[1:top_p]"
+        energy_1d = np.log(energy_1d[:top_p] + 10e-8)  # We might drop r0 before normalization to fix the r0 problem "[1:top_p]"
         # Normalize to one for wassertein distance later
         total_energy = np.sum(energy_1d)
         if total_energy > 0:

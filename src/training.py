@@ -29,6 +29,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # Training loop
 def train_models(u_t_all, u_t1_all, labels, grid_data):
     trained_models = []
+    channels = u_t_all.shape[-1] if u_t_all.ndim == 4 else 1
 
     for cluster_idx in range(K_CLUSTER):
         cluster_u_t = u_t_all[labels == cluster_idx]
@@ -45,16 +46,23 @@ def train_models(u_t_all, u_t1_all, labels, grid_data):
         # Format Tensors based on model type
         vals_tensor = torch.tensor(np.stack(cluster_boundary_vals), dtype=torch.float32)
         xy_tensor   = torch.tensor(np.stack(cluster_boundary_xy), dtype=torch.float32)
-        boundary_tensor = torch.cat([xy_tensor, vals_tensor.unsqueeze(-1)], dim=-1).to(device)
+        if vals_tensor.ndim == 2:
+            vals_tensor = vals_tensor.unsqueeze(-1)
+        boundary_tensor = torch.cat([xy_tensor, vals_tensor], dim=-1).to(device)
 
         if MODEL_TYPE == 'fno':
-            u_t_tensor = torch.tensor(cluster_u_t, dtype=torch.float32).unsqueeze(1).to(device)
-            u_t1_tensor = torch.tensor(cluster_u_t1, dtype=torch.float32).unsqueeze(1).to(device)
+            u_t_tensor = torch.tensor(cluster_u_t, dtype=torch.float32)
+            u_t1_tensor = torch.tensor(cluster_u_t1, dtype=torch.float32)
+            if u_t_tensor.ndim == 3:
+                u_t_tensor = u_t_tensor.unsqueeze(-1)
+                u_t1_tensor = u_t1_tensor.unsqueeze(-1)
+            u_t_tensor = u_t_tensor.permute(0, 3, 1, 2).to(device)
+            u_t1_tensor = u_t1_tensor.permute(0, 3, 1, 2).to(device)
         else:
             u_t_tensor = torch.tensor([sub.flatten() for sub in cluster_u_t], dtype=torch.float32).to(device)
             u_t1_tensor = torch.tensor([sub.flatten() for sub in cluster_u_t1], dtype=torch.float32).to(device)
 
-        model = initialize_model(MODEL_TYPE, N, device)
+        model = initialize_model(MODEL_TYPE, N, device, channels=channels)
         optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
         loss_func = nn.MSELoss()
 
@@ -103,6 +111,7 @@ if __name__ == "__main__":
             z_indices=TRAIN_Z,
             start_t=TRAIN_START,
             stop_t=TRAIN_STOP,
+            component=("u", "v", "w")
         )
         print(f"Training z planes: {z_indices}")
         u_t_all, u_t1_all = data_loader.domain_decomposition_trajectories(

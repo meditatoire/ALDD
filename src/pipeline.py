@@ -10,17 +10,28 @@ from models import DeepONet_BENO, FNO_BENO
 
 
 def subdomain_union(subdomains, H, W, block_size, overlap=1):
-    """Reconstructs the full domain from subdomains, averaging the overlaps."""
-    full_domain = np.zeros((H, W))
-    count = np.zeros((H, W))
+    """
+    subdomains shape:
+        (num_blocks, block_size, block_size)       scalar
+        (num_blocks, block_size, block_size, C)    vector
+    """
+    if subdomains.ndim not in (3, 4):
+        raise ValueError("subdomains must have shape (S, N, N) or (S, N, N, C)")
 
+    field_shape = (H, W) + tuple(subdomains.shape[3:])
+    full_domain = np.zeros(field_shape, dtype=subdomains.dtype)
+    count = np.zeros((H, W), dtype=np.float32)
     idx = 0
     for i in data_loader.block_starts(H, block_size, overlap):
         for j in data_loader.block_starts(W, block_size, overlap):
-            full_domain[i:i+block_size, j:j+block_size] += subdomains[idx]
+            full_domain[i:i+block_size, j:j+block_size, ...] += subdomains[idx]
             count[i:i+block_size, j:j+block_size] += 1
             idx += 1
-    return full_domain / np.maximum(count, 1)
+
+    divisor = np.maximum(count, 1)
+    if full_domain.ndim > 2:
+        divisor = divisor[..., None]
+    return full_domain / divisor
 
 
 def setup_grids(model_type, n, device):
@@ -37,12 +48,12 @@ def setup_grids(model_type, n, device):
     return torch.tensor(grid_coords, dtype=torch.float32).to(device)
 
 
-def initialize_model(model_type, n, device):
+def initialize_model(model_type, n, device, channels=1):
     """Initializes the selected model."""
     if model_type == 'fno':
-        return FNO_BENO(modes=8, width=64, num_layers=4).to(device)
+        return FNO_BENO(modes=8, width=64, num_layers=4, field_channels=channels, out_channels=channels).to(device)
 
-    return DeepONet_BENO(branch_input_dim=n*n, latent_dim=128).to(device)
+    return DeepONet_BENO(branch_input_dim=n*n*channels, latent_dim=128, channels=channels).to(device)
 
 
 def build_checkpoint_name(model_type, epochs, k_cluster, n, top_p):
@@ -68,6 +79,7 @@ def save_checkpoint(
         "epochs": epochs,
         "k_cluster": k_cluster,
         "top_p": top_p,
+        "channels": getattr(trained_models[0], "channels", 1),
         "centroids": centroids,
         "model_state_dicts": [model.state_dict() for model in trained_models],
     }
@@ -88,7 +100,10 @@ def load_checkpoint(checkpoint_path, device):
     models = []
 
     for state_dict in checkpoint["model_state_dicts"]:
-        model = initialize_model(checkpoint["model_type"], checkpoint["n"], device)
+        model = initialize_model(
+            checkpoint["model_type"], checkpoint["n"], device,
+            channels=checkpoint.get("channels", 1),
+        )
         model.load_state_dict(state_dict)
         model.eval()
         models.append(model)
@@ -115,6 +130,7 @@ def validate_autoregressive(
             data_path,
             z_indices=val_z,
             stop_t=val_timesteps,
+            component=("u", "v", "w"),
         )
     else:
         val_series = data_loader.load_data(num_timesteps=val_timesteps, start_t=120)
@@ -168,37 +184,43 @@ def _validate_series(
             model = trained_models[val_labels[i]]
 
             vals, xy = data_loader.extract_boundary(sub)
-            boundary_token = np.concatenate([xy, vals.reshape(-1, 1)], axis=1)  # (M, 3)
+            if vals.ndim == 1:
+                vals = vals[:, None]
+            boundary_token = np.concatenate([xy, vals], axis=1)
             boundary_tensor = torch.tensor(boundary_token, dtype=torch.float32).unsqueeze(0).to(device)
 
             with torch.no_grad():
                 if model_type == 'fno':
-                    sub_tensor = torch.tensor(sub, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(device)
+                    sub_tensor = torch.tensor(sub, dtype=torch.float32).permute(2, 0, 1).unsqueeze(0).to(device)
                     pred = model(sub_tensor, grid_data, boundary_tensor)
-                    predicted_subs[i] = pred.squeeze().cpu().numpy()
+                    predicted_subs[i] = pred.squeeze(0).permute(1, 2, 0).cpu().numpy()
                 else:
                     sub_tensor = torch.tensor(sub.flatten(), dtype=torch.float32).unsqueeze(0).to(device)
                     pred = model(sub_tensor, grid_data, boundary_tensor)
-                    predicted_subs[i] = pred.squeeze().cpu().numpy().reshape(n, n)
+                    predicted_subs[i] = pred.reshape(1, -1, n * n).permute(0, 2, 1).reshape(n, n, -1).squeeze(0).cpu().numpy()
 
         next_frame = subdomain_union(predicted_subs, H, W, block_size=n, overlap=1)
         prediction_series.append(next_frame)
         current_frame = next_frame
 
         true_frame = val_series[t+1]
-        ss_res = np.sum((true_frame - next_frame)**2)
-        ss_total = np.sum((true_frame - np.mean(true_frame))**2)
+        true_u = true_frame[..., 0] if true_frame.ndim == 3 else true_frame
+        next_u = next_frame[..., 0] if next_frame.ndim == 3 else next_frame
+        ss_res = np.sum((true_u - next_u)**2)
+        ss_total = np.sum((true_u - np.mean(true_u))**2)
         r2 = 1 - ss_res / ss_total
         print(f"Step: {t+1}/{val_timesteps-1} | R² Score: {r2:.4f}")
 
     true_final = val_series[-1]
     pred_final = prediction_series[-1]
-    error_map = np.abs(true_final - pred_final)
+    true_u = true_final[..., 0] if true_final.ndim == 3 else true_final
+    pred_u = pred_final[..., 0] if pred_final.ndim == 3 else pred_final
+    error_map = np.abs(true_u - pred_u)
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-    axes[0].imshow(true_final, cmap='viridis')
+    axes[0].imshow(true_u, cmap='viridis')
     axes[0].set_title(f"Ground Truth (T+{val_timesteps-1})")
-    axes[1].imshow(pred_final, cmap='viridis')
+    axes[1].imshow(pred_u, cmap='viridis')
     axes[1].set_title(f"{model_type.upper()} Prediction (T+{val_timesteps-1})")
     im3 = axes[2].imshow(error_map, cmap='magma')
     axes[2].set_title("Absolute Error")

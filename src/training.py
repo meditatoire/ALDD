@@ -1,5 +1,3 @@
-from numpy.random.mtrand import permutation
-
 import data_loader
 import cluster
 import torch

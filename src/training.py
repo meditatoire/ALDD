@@ -12,14 +12,14 @@ from pipeline import initialize_model, save_checkpoint, setup_grids
 MODEL_TYPE = 'fno'  # model: 'fno' or 'deeponet'
 
 DATASET = "jhtdb"  # "cylinder" or "jhtdb"
-JHTDB_PATH = "./JHTDB/data/jhtdb_test/small_planes.h5"
-TRAIN_Z = [64, 512]  # Hold out the remaining z planes for validation.
+JHTDB_PATH = "../JHTDB/data/jhtdb_test/small_planes.h5"
+TRAIN_Z = [32, 64, 96, 128, 160, 192, 224, 256, 320, 352, 384, 416, 448, 480]  # Hold out the remaining z planes for validation.
 TRAIN_START = 0
 TRAIN_STOP = None
 
 N = 16     # Subdomain size (NxN)
-BATCH_SIZE = 512
-EPOCHS = 100
+BATCH_SIZE = 5096
+EPOCHS = 200
 K_CLUSTER = 3
 TOP_P = 25 # Dimension reduction for subdomain clustering
 

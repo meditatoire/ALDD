@@ -7,7 +7,7 @@ from pipeline import load_checkpoint, setup_grids, validate_autoregressive
 
 VAL_TIMESTEPS = 10
 DATASET = "jhtdb"  # "cylinder" or "jhtdb"
-JHTDB_PATH = "../JHTDB/data/jhtdb_test/small_planes.h5"
+JHTDB_PATH = "JHTDB/data/jhtdb_test/small_planes.h5"
 VAL_Z = [288]  # Different z planes than training.py: TRAIN_Z.
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

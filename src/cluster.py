@@ -5,6 +5,7 @@ from data_loader import load_data, domain_decomposition, domain_decomp_single_fr
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
+SPATIAL_AXES = (0, 1) #La FFT prends par défaut les deux derniers axes comme les axes spatiaux or nous avons (x,y,nb_value) donc nous devons le préciser 
 
 def pca_reduction(subdomains, n_comp=10):
     X = np.array([sub.flatten() for sub in subdomains]) # Flattening will make us loose info on x and y
@@ -26,45 +27,67 @@ def energy_spectrum_reduction(subdomains, top_p=10):
     features = []
     N = subdomains[0].shape[0] # assuming the shape of the subdomain is (N, N)
 
-    # Compute the radial distance map
+    # Carte des distances au centre fréquentiel
     center = N // 2
-    y, x = np.indices((N,N))
-    r = np.sqrt((x-center)**2 + (y-center)**2)
+    y, x = np.indices((N, N))
 
-    # Radial bins (integer distances from 0 to N/2)
-    # E.g., for N=32 bins will be 0,1,..,16
-    max_k = int(np.ceil(np.sqrt(2)*(N/2))) # max_k reaching the corner, maybe wrong needs to be revisited.
-    radial_bins = np.arange(0, max_k+1)
-    #note: we mix the diagonal energies with axial energies since we "project" the corners
-    #into the closest rings
+    radius_map = np.sqrt((x - center) ** 2 + (y - center) ** 2)
+
+    # Rayon maximal atteignant les coins du spectre
+    max_radius = int(np.ceil(np.sqrt(2) * N / 2))
+
+    radial_bins = np.arange(0,max_radius + 1)
+
+    number_of_bins = min(top_p,len(radial_bins))
 
     for sub in subdomains:
-        # 2D fourier transform
-        f_transform = np.fft.fft2(sub)  # We might do sub-sub.mean() to fix the r0 problem
+        
+        #--------------------------------------------------------------#
+        # Calcul de E(k_x,k_y) = |\hat{u}|^2 + |\hat{v}|^2 + |\hat{w}|^2
+        #--------------------------------------------------------------#
+        #on met bien en array 
+        field = np.asarray(sub)
+        
+        #on checke qu'on a bien les bons trucs 
+        if field.ndim not in (2, 3):
+            raise ValueError(
+                "Un sous-domaine doit avoir la shape (N, N) "
+                "ou (N, N, C)."
+            )
+
+        f_transform = np.fft.fft2(field,axes=SPATIAL_AXES)  # We might do sub-sub.mean() to fix the r0 problem
 
         # Shift zero-frequency component to center
-        f_shifted = np.fft.fftshift(f_transform)
+        f_shifted = np.fft.fftshift(f_transform,axes=SPATIAL_AXES)
 
         # Compute energy
         energy_2d = np.abs(f_shifted)**2
-
+        
+        if field.ndim == 3:
+            energy_2d = energy_2d.sum(axis=-1)
+            
+        #--------------------------------------------------------------#
+        #--------------------------------------------------------------#
+        
+        #--------------------------------------------------------------#
+        # somme de l'énergie sur l'anneau fréquentiel 
+        #--------------------------------------------------------------#
         # For each ring of distance r sum the values
         energy_1d = np.zeros(len(radial_bins))
         for i, r_val in enumerate(radial_bins):
-            mask = (r >= r_val - 0.5) & (r < r_val + 0.5)
+            mask = (radius_map >= r_val - 0.5) & (radius_map < r_val + 0.5)
             if np.any(mask):
                 energy_1d[i] = np.sum(energy_2d[mask])
+                   
+        #--------------------------------------------------------------#
+        # On tronque et on normalise
+        #--------------------------------------------------------------#
+        spectrum = np.asarray(energy_1d[:number_of_bins],dtype=np.float64)
+        total_energy = spectrum.sum()
+        features.append(spectrum/total_energy)
+        
+    return np.stack(features) 
 
-        energy_1d = np.log(energy_1d[:top_p] + 10e-8)  # We might drop r0 before normalization to fix the r0 problem "[1:top_p]"
-        # Normalize to one for wassertein distance later
-        total_energy = np.sum(energy_1d)
-        if total_energy > 0:
-            energy_1d = energy_1d / total_energy
-        features.append(energy_1d)
-
-    # print(np.mean(np.array(features)[:, 0])) # NOTE!!! r=0 on average is 0.97 and thus the energy of the mean dominate the others
-    # We end up clustering by the energy of the mean
-    return np.array(features)
 
 def spectrum_wasserstein(x, y):
     # 1D W_2^2 distance between two normalized spectra (PDFs on integer bins).

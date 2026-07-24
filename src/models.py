@@ -21,7 +21,7 @@ class PositionalEncoding(nn.Module):
 
 class DeepONet_BENO(nn.Module):
     #Appendix A.2 for hyperparameters
-    def __init__(self, branch_input_dim, latent_dim, trunk_input_dim=2, hidden_dim=64, n_heads=2):
+    def __init__(self, branch_input_dim, latent_dim, trunk_input_dim=2, hidden_dim=64, n_heads=2, channels=1):
         """
         branch_input_dim: Number of observations in a subdomain e.g. 32x32 flattened
         trunk_input_dim: 2 for x and y
@@ -29,15 +29,16 @@ class DeepONet_BENO(nn.Module):
         output_dim: Num of physical variables to predict (here one the velocity u)
         """
         super().__init__()
+        self.channels = channels
 
         #Boundary transformer BENO
-        self.beno_conv = nn.Conv1d(in_channels=3, out_channels=hidden_dim, kernel_size=3, padding='same') #in_channels of boundary x,y and u
+        self.beno_conv = nn.Conv1d(in_channels=2 + channels, out_channels=hidden_dim, kernel_size=3, padding='same')
         self.pos_encoder = PositionalEncoding(d_model=hidden_dim)
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=n_heads, batch_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
 
         # Project transformer output to latent dim
-        self.beno_proj = nn.Linear(hidden_dim, latent_dim)
+        self.beno_proj = nn.Linear(hidden_dim, latent_dim * channels)
 
         # Branch network (Now it takes interior + boundary embeddings)
         # We concatenate branch output and embeddings
@@ -46,7 +47,7 @@ class DeepONet_BENO(nn.Module):
             nn.Tanh(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.Tanh(),
-            nn.Linear(hidden_dim, latent_dim)
+            nn.Linear(hidden_dim, latent_dim * channels)
         )
         # Trunk network
         self.trunk = nn.Sequential(
@@ -80,15 +81,16 @@ class DeepONet_BENO(nn.Module):
         beno_embed = self.beno_proj(beno_embed)
 
         # branch and trunk
-        branch_out = self.branch(u_branch)
+        branch_out = self.branch(u_branch).view(u_branch.shape[0], self.channels, -1)
         trunk_out = self.trunk(y_trunk)
 
         #combined branch
+        beno_embed = beno_embed.view(u_branch.shape[0], self.channels, -1)
         combined_branch = branch_out + beno_embed
 
-        dot_product = torch.matmul(combined_branch, trunk_out.T)
+        dot_product = torch.einsum('bcl,pl->bcp', combined_branch, trunk_out)
 
-        return dot_product
+        return dot_product.reshape(u_branch.shape[0], -1)
 
 class SpectralConv(nn.Module):
     def __init__(self, in_channels, out_channels, modes1, modes2):
@@ -134,15 +136,16 @@ class FNO_Block(nn.Module):
         return self.act(x1 +x2) if self.activation else x1 + x2
 
 class FNO_BENO(nn.Module):
-    def __init__(self, modes=8, width=64, num_layers=4):
+    def __init__(self, modes=8, width=64, num_layers=4, field_channels=1, out_channels=1):
         super().__init__()
         self.modes1 = modes
         self.modes2 = modes
         self.width = width
         self.num_layers = num_layers
+        self.channels = field_channels
 
         #Boundary transformer BENO
-        self.beno_conv = nn.Conv1d(in_channels=3, out_channels=width, kernel_size=3, padding='same')
+        self.beno_conv = nn.Conv1d(in_channels=2 + field_channels, out_channels=width, kernel_size=3, padding='same')
         self.pos_encoder = PositionalEncoding(d_model=width)
         encoder_layer = nn.TransformerEncoderLayer(d_model=width, nhead=2, batch_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
@@ -151,13 +154,13 @@ class FNO_BENO(nn.Module):
 
         #FNO arch
         # input is 1 channel u_velocity + 2 channels x and y
-        self.fc0 = nn.Linear(3, self.width)
+        self.fc0 = nn.Linear(2 + field_channels, self.width)
         # Stack FNO layers
         self.layers = nn.ModuleList([FNO_Block(self.width, self.modes1, self.modes2) for _ in range(num_layers -1)])
         self.last_block = FNO_Block(self.width, self.modes1, self.modes2, activation=False)
         # Project down
         self.fc1 = nn.Linear(self.width, 128)
-        self.fc2 = nn.Linear(128, 1) # out 1 channel u_velocity
+        self.fc2 = nn.Linear(128, out_channels) # out 1 channel u_velocity
 
     def forward(self, x, grid, boundary_u):
         """

@@ -6,6 +6,9 @@ from pipeline import load_checkpoint, setup_grids, validate_autoregressive
 
 
 VAL_TIMESTEPS = 10
+DATASET = "jhtdb"  # "cylinder" or "jhtdb"
+JHTDB_PATH = "JHTDB/data/jhtdb_test/small_planes.h5"
+VAL_Z = [288]  # Different z planes than training.py: TRAIN_Z.
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -33,6 +36,9 @@ if __name__ == "__main__":
     print(f"Checkpoint: {args.checkpoint}")
     print(f"Model Type: {checkpoint['model_type'].upper()}")
     print(f"Epochs: {checkpoint['epochs']}")
+    print(f"Number of clusters: {checkpoint['k_cluster']}")
+    print(f"Subdomain size: {checkpoint['n']}")
+    print(f"Spectral bins: {checkpoint['top_p']}")
 
     grid_data = setup_grids(checkpoint["model_type"], checkpoint["n"], device)
     validate_autoregressive(
@@ -44,4 +50,7 @@ if __name__ == "__main__":
         top_p=checkpoint["top_p"],
         val_timesteps=args.val_timesteps,
         device=device,
+        dataset=DATASET,
+        data_path=JHTDB_PATH,
+        val_z=VAL_Z,
     )

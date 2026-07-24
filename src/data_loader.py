@@ -4,6 +4,45 @@ import scipy.io
 from scipy.interpolate import griddata
 import numpy as np
 import matplotlib.pyplot as plt
+import h5py
+
+
+def block_starts(size, block_size, overlap=1):
+    """Return block starts that cover the full dimension, including the end."""
+    step = block_size - overlap
+    starts = list(range(0, size - block_size + 1, step))
+    last_start = size - block_size
+    if starts[-1] != last_start:
+        starts.append(last_start)
+    return starts
+
+
+def load_jhtdb_data(filename, z_indices=None, start_t=0, stop_t=None, component=("u", "v", "w")):
+    """Load JHTDB planes as (z, time, height, width, c) 3D trajectories."""
+
+    with h5py.File(filename, "r") as f:
+        all_z = f["z_indices"][:]
+        if z_indices is None:
+            z_positions = np.arange(len(all_z))
+        else:
+            missing_z = [z for z in z_indices if z not in all_z]
+            if missing_z:
+                raise ValueError(
+                    f"Requested z values {missing_z} are not in the file. "
+                    f"Available z values: {all_z.tolist()}"
+                )
+            z_positions = [int(np.flatnonzero(all_z == z)[0]) for z in z_indices]
+
+        time_slice = slice(start_t, stop_t)
+        arrays = []
+        for comp in component:
+            arr = f[comp][z_positions, time_slice].astype(np.float32)
+            arrays.append(arr)
+        trajectories = np.stack(arrays, axis=-1)
+        selected_z = all_z[z_positions]
+        time_indices = f["time_indices"][time_slice]
+
+    return trajectories, selected_z, time_indices
 
 def load_data(num_timesteps=100, start_t=0):
     """
@@ -53,28 +92,58 @@ def domain_decomposition(time_series, block_size=32, overlap=1):
     T,H, W = time_series.shape
     subdomains_t = []
     subdomains_t1 = []
-    step = block_size - overlap
-
     for t in range(T-1):
         u_t = time_series[t]
         u_t1 = time_series[t+1]
 
-        for i in range(0, H-block_size+1, step):
-            for j in range(0, W-block_size+1, step):
+        for i in block_starts(H, block_size, overlap):
+            for j in block_starts(W, block_size, overlap):
                 subdomains_t.append(u_t[i:i+block_size, j:j+block_size])
                 subdomains_t1.append(u_t1[i:i+block_size, j:j+block_size])
 
     return np.array(subdomains_t), np.array(subdomains_t1)
 
+
+def domain_decomposition_trajectories(trajectories, block_size=32, overlap=1):
+    """
+    Decompose (Z, T, H, W) or (Z, T, H, W, C) into paired 2D blocks.
+    Returns:
+        subdomains_t:  (S, block_size, block_size, C)
+        subdomains_t1: (S, block_size, block_size, C)
+    """
+    if trajectories.ndim == 4:
+        trajectories = trajectories[..., None]  # add channel dim
+
+    if trajectories.ndim != 5:
+        raise ValueError("trajectories must have shape (Z, T, H, W) or (Z, T, H, W, C)")
+
+    Z, T, H, W, C = trajectories.shape
+    subdomains_t = []
+    subdomains_t1 = []
+
+    for z in range(Z):
+        for t in range(T - 1):
+            frame_t = trajectories[z, t]      # (H, W, C)
+            frame_t1 = trajectories[z, t + 1] # (H, W, C)
+
+            for i in block_starts(H, block_size, overlap):
+                for j in block_starts(W, block_size, overlap):
+                    subdomains_t.append(frame_t[i:i + block_size, j:j + block_size, :])
+                    subdomains_t1.append(frame_t1[i:i + block_size, j:j + block_size, :])
+
+    return np.asarray(subdomains_t), np.asarray(subdomains_t1)
+
 def domain_decomp_single_frame(frame, block_size=32, overlap=1):
     """Slices a single 2D frame into subdomains for inference."""
-    H, W = frame.shape
-    subdomains = []
-    step = block_size - overlap
 
-    for i in range(0, H-block_size+1, step):
-        for j in range(0, W-block_size+1, step):
-            subdomains.append(frame[i:i+block_size, j:j+block_size])
+    if frame.ndim == 2:
+        frame = frame[..., None]
+
+    H, W, C = frame.shape
+    subdomains = []
+    for i in block_starts(H, block_size, overlap):
+        for j in block_starts(W, block_size, overlap):
+            subdomains.append(frame[i:i+block_size, j:j+block_size, :])
 
     return np.array(subdomains)
 
@@ -82,21 +151,24 @@ def extract_boundary(subdomain):
     """Extracts perimeter nodes: values + local coordinates.
     Returns: (4N-4,) values, (4N-4, 2) normalized coordinates in [-1, 1].
     """
-    N = subdomain.shape[0]
+    if subdomain.ndim == 2:
+        subdomain = subdomain[..., None]
+
+    N, _, C = subdomain.shape
     # Normalized local coordinates for each grid point
     coords_1d = np.linspace(-1, 1, N)
     xx, yy = np.meshgrid(coords_1d, coords_1d)  # (N, N) each
 
-    top_val = subdomain[0, :]
+    top_val = subdomain[0, :, :]
     top_xy = np.stack([xx[0, :], yy[0, :]], axis=1)           # (N, 2)
 
-    right_val = subdomain[1:-1, -1]
+    right_val = subdomain[1:-1, -1, :]
     right_xy = np.stack([xx[1:-1, -1], yy[1:-1, -1]], axis=1) # (N-2, 2)
 
-    bottom_val = subdomain[-1, ::-1]
+    bottom_val = subdomain[-1, ::-1, :]
     bottom_xy = np.stack([xx[-1, ::-1], yy[-1, ::-1]], axis=1) # (N, 2)
 
-    left_val = subdomain[1:-1, 0][::-1]
+    left_val = subdomain[1:-1, 0, :][::-1]
     left_xy = np.stack([xx[1:-1, 0], yy[1:-1, 0]], axis=1)     # (N-2, 2)
     left_xy = left_xy[::-1]  # match the reversed traversal
 

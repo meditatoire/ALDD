@@ -9,7 +9,7 @@ PyTorch implementation of the paper:
 
 ---
 
-## What it is about ?
+## What is it about?
 
 This code trains **operator regression models** (FNO and DeepONet) to predict fluid dynamics on large 2D fields by decomposing the domain into smaller subdomains with similar regimes (Laminar / Turbulent / Transitional). Following the idea of **Adaptive Local Domain Decomposition (ALDD)**:
 
